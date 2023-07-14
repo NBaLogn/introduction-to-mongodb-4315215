@@ -6,6 +6,7 @@ use MongoDB\ChangeStream;
 use MongoDB\Client;
 use MongoDB\Collection;
 use MongoDB\Database;
+use MongoDB\Driver\ClientEncryption;
 use MongoDB\Driver\Cursor;
 use MongoDB\Driver\ReadConcern;
 use MongoDB\Driver\ReadPreference;
@@ -19,6 +20,7 @@ use function array_fill_keys;
 use function array_key_exists;
 use function array_keys;
 use function implode;
+use function PHPUnit\Framework\assertArrayHasKey;
 use function PHPUnit\Framework\assertContains;
 use function PHPUnit\Framework\assertEmpty;
 use function PHPUnit\Framework\assertIsArray;
@@ -59,6 +61,16 @@ final class Util
             'listDatabaseNames' => ['authorizedDatabases', 'filter', 'maxTimeMS', 'session'],
             'listDatabases' => ['authorizedDatabases', 'filter', 'maxTimeMS', 'session'],
         ],
+        ClientEncryption::class => [
+            'addKeyAltName' => ['id', 'keyAltName'],
+            'createDataKey' => ['kmsProvider', 'opts'],
+            'deleteKey' => ['id'],
+            'getKey' => ['id'],
+            'getKeyByAltName' => ['keyAltName'],
+            'getKeys' => [],
+            'removeKeyAltName' => ['id', 'keyAltName'],
+            'rewrapManyDataKey' => ['filter', 'opts'],
+        ],
         Database::class => [
             'aggregate' => ['pipeline', 'session', 'useCursor', 'allowDiskUse', 'batchSize', 'bypassDocumentValidation', 'collation', 'comment', 'explain', 'hint', 'let', 'maxAwaitTimeMS', 'maxTimeMS'],
             'createChangeStream' => ['pipeline', 'session', 'fullDocument', 'resumeAfter', 'startAfter', 'startAtOperationTime', 'batchSize', 'collation', 'maxAwaitTimeMS', 'showExpandedEvents'],
@@ -66,7 +78,7 @@ final class Util
             'dropCollection' => ['collection', 'session'],
             'listCollectionNames' => ['authorizedCollections', 'filter', 'maxTimeMS', 'session'],
             'listCollections' => ['authorizedCollections', 'filter', 'maxTimeMS', 'session'],
-            'modifyCollection' => ['collection', 'changeStreamPreAndPostImages'],
+            'modifyCollection' => ['collection', 'changeStreamPreAndPostImages', 'index', 'validator'],
             // Note: commandName is not used by PHP
             'runCommand' => ['command', 'session', 'commandName'],
         ],
@@ -75,7 +87,7 @@ final class Util
             'bulkWrite' => ['let', 'requests', 'session', 'ordered', 'bypassDocumentValidation', 'comment'],
             'createChangeStream' => ['pipeline', 'session', 'fullDocument', 'fullDocumentBeforeChange', 'resumeAfter', 'startAfter', 'startAtOperationTime', 'batchSize', 'collation', 'maxAwaitTimeMS', 'comment', 'showExpandedEvents'],
             'createFindCursor' => ['filter', 'session', 'allowDiskUse', 'allowPartialResults', 'batchSize', 'collation', 'comment', 'cursorType', 'hint', 'limit', 'max', 'maxAwaitTimeMS', 'maxScan', 'maxTimeMS', 'min', 'modifiers', 'noCursorTimeout', 'oplogReplay', 'projection', 'returnKey', 'showRecordId', 'skip', 'snapshot', 'sort'],
-            'createIndex' => ['keys', 'commitQuorum', 'maxTimeMS', 'name', 'session', 'comment'],
+            'createIndex' => ['keys', 'comment', 'commitQuorum', 'maxTimeMS', 'name', 'session', 'unique'],
             'dropIndex' => ['name', 'session', 'maxTimeMS', 'comment'],
             'count' => ['filter', 'session', 'collation', 'hint', 'limit', 'maxTimeMS', 'skip', 'comment'],
             'countDocuments' => ['filter', 'session', 'limit', 'skip', 'collation', 'hint', 'maxTimeMS', 'comment'],
@@ -93,7 +105,7 @@ final class Util
             'findOneAndUpdate' => ['let', 'returnDocument', 'filter', 'update', 'session', 'upsert', 'projection', 'remove', 'arrayFilters', 'bypassDocumentValidation', 'collation', 'hint', 'maxTimeMS', 'sort', 'comment'],
             'updateMany' => ['let', 'filter', 'update', 'session', 'upsert', 'arrayFilters', 'bypassDocumentValidation', 'collation', 'hint', 'comment'],
             'updateOne' => ['let', 'filter', 'update', 'session', 'upsert', 'arrayFilters', 'bypassDocumentValidation', 'collation', 'hint', 'comment'],
-            'insertMany' => ['options', 'documents', 'session', 'ordered', 'bypassDocumentValidation', 'comment'],
+            'insertMany' => ['documents', 'session', 'ordered', 'bypassDocumentValidation', 'comment'],
             'insertOne' => ['document', 'session', 'bypassDocumentValidation', 'comment'],
             'listIndexes' => ['session', 'maxTimeMS', 'comment'],
             'mapReduce' => ['map', 'reduce', 'out', 'session', 'bypassDocumentValidation', 'collation', 'finalize', 'jsMode', 'limit', 'maxTimeMS', 'query', 'scope', 'sort', 'verbose', 'comment'],
@@ -130,6 +142,8 @@ final class Util
 
     public static function assertArgumentsBySchema(string $executingObjectName, string $operation, array $args): void
     {
+        assertArrayHasKey($executingObjectName, self::$args);
+        assertArrayHasKey($operation, self::$args[$executingObjectName]);
         self::assertHasOnlyKeys($args, self::$args[$executingObjectName][$operation]);
     }
 

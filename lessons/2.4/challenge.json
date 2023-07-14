@@ -1,0 +1,32 @@
+{
+    "title":"random recipe",
+    "desc":"nonsense",
+    "rating":[1,2,3,4,5],
+    "tags":[
+        "nonsense",
+        "indeterminate",
+        "cursed",
+        "blessed"
+    ],
+    "directions":[
+        "1",
+        "2",
+        "3"
+    ],
+    "ingredients":[
+        {
+            "amount":{
+                "quantity": 999,
+                "unit":"sprinkles"
+            },
+            "name":"cursed ingredient"
+        },
+        {
+            "amount":{
+                "quantity": 1,
+                "unit":"pinches"
+            },
+            "name":"blessed ingredient"
+        }
+    ]
+}

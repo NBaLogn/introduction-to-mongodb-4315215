@@ -25,6 +25,8 @@ use function gc_collect_cycles;
 use function getenv;
 use function implode;
 use function in_array;
+use function is_executable;
+use function is_readable;
 use function is_string;
 use function parse_url;
 use function PHPUnit\Framework\assertContainsOnly;
@@ -43,7 +45,9 @@ use function strpos;
 use function substr_replace;
 use function version_compare;
 
+use const DIRECTORY_SEPARATOR;
 use const FILTER_VALIDATE_BOOLEAN;
+use const PATH_SEPARATOR;
 use const PHP_URL_HOST;
 
 /**
@@ -60,7 +64,9 @@ final class UnifiedTestRunner
 
     public const MIN_SCHEMA_VERSION = '1.0';
 
-    public const MAX_SCHEMA_VERSION = '1.7';
+    /* Note: This is necessary to support expectedError.errorResponse from 1.12;
+     * however, syntax from 1.9, 1.10, and 1.11 has not been implemented. */
+    public const MAX_SCHEMA_VERSION = '1.12';
 
     /** @var MongoDB\Client */
     private $internalClient;
@@ -80,6 +86,9 @@ final class UnifiedTestRunner
     /** @var FailPointObserver */
     private $failPointObserver;
 
+    /** @var ServerParameterHelper */
+    private $serverParameterHelper;
+
     public function __construct(string $internalClientUri)
     {
         $this->internalClient = FunctionalTestCase::createTestClient($internalClientUri);
@@ -91,6 +100,8 @@ final class UnifiedTestRunner
         if ($this->isServerless() || strpos($internalClientUri, self::ATLAS_TLD) !== false) {
             $this->allowKillAllSessions = false;
         }
+
+        $this->serverParameterHelper = new ServerParameterHelper($this->internalClient);
     }
 
     public function run(UnifiedTestCase $test): void
@@ -114,7 +125,7 @@ final class UnifiedTestRunner
              * succeeding or failing. Since the callable itself might throw, we
              * need to ensure doTearDown() will still be called. */
             try {
-                if (isset($this->entityMapObserver)) {
+                if (isset($this->entityMapObserver, $this->entityMap)) {
                     call_user_func($this->entityMapObserver, $this->entityMap);
                 }
             } finally {
@@ -244,9 +255,10 @@ final class UnifiedTestRunner
             $cachedIsSatisfiedArgs = [
                 $this->getServerVersion(),
                 $this->getTopology(),
-                $this->getServerParameters(),
+                $this->serverParameterHelper,
                 $this->isAuthenticated(),
                 $this->isServerless(),
+                $this->isClientSideEncryptionSupported(),
             ];
         }
 
@@ -259,7 +271,7 @@ final class UnifiedTestRunner
 
         // @todo Add server parameter requirements?
         Assert::markTestSkipped(sprintf(
-            'Server (version=%s, toplogy=%s, auth=%s) does not meet test requirements',
+            'Server (version=%s, topology=%s, auth=%s) does not meet test requirements',
             $cachedIsSatisfiedArgs[0],
             $cachedIsSatisfiedArgs[1],
             $cachedIsSatisfiedArgs[3] ? 'yes' : 'no'
@@ -271,24 +283,6 @@ final class UnifiedTestRunner
         $manager = $this->internalClient->getManager();
 
         return $manager->selectServer(new ReadPreference(ReadPreference::PRIMARY));
-    }
-
-    private function getServerParameters(): stdClass
-    {
-        $database = $this->internalClient->selectDatabase('admin');
-        $cursor = $database->command(
-            ['getParameter' => '*'],
-            [
-                'readPreference' => new ReadPreference(ReadPreference::PRIMARY),
-                'typeMap' => [
-                    'root' => 'object',
-                    'document' => 'object',
-                    'array' => 'array',
-                ],
-            ]
-        );
-
-        return $cursor->toArray()[0];
     }
 
     private function getServerVersion(): string
@@ -326,7 +320,7 @@ final class UnifiedTestRunner
                 return RunOnRequirement::TOPOLOGY_LOAD_BALANCED;
 
             default:
-                throw new UnexpectedValueException('Toplogy is neither single nor RS nor sharded');
+                throw new UnexpectedValueException('Topology is neither single nor RS nor sharded');
         }
     }
 
@@ -347,6 +341,48 @@ final class UnifiedTestRunner
         }
 
         throw new UnexpectedValueException('Could not determine authentication status');
+    }
+
+    /**
+     * Return whether client-side encryption is supported.
+     */
+    private function isClientSideEncryptionSupported(): bool
+    {
+        /* CSFLE technically requires FCV 4.2+ but this is sufficient since we
+         * do not test on mixed-version clusters. */
+        if (version_compare($this->getServerVersion(), '4.2', '<')) {
+            return false;
+        }
+
+        if (FunctionalTestCase::getModuleInfo('libmongocrypt') === 'disabled') {
+            return false;
+        }
+
+        return static::isCryptSharedLibAvailable() || static::isMongocryptdAvailable();
+    }
+
+    private static function isCryptSharedLibAvailable(): bool
+    {
+        $cryptSharedLibPath = getenv('CRYPT_SHARED_LIB_PATH');
+
+        if ($cryptSharedLibPath === false) {
+            return false;
+        }
+
+        return is_readable($cryptSharedLibPath);
+    }
+
+    private static function isMongocryptdAvailable(): bool
+    {
+        $paths = explode(PATH_SEPARATOR, getenv("PATH"));
+
+        foreach ($paths as $path) {
+            if (is_executable($path . DIRECTORY_SEPARATOR . 'mongocryptd')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

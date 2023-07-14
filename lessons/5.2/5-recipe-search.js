@@ -58,7 +58,8 @@ const recipe_search = (search) => {
 
 const display_recipe = (recipe) => {
 
-  const total_time = recipe["prep_time"]+recipe["cook_time"];
+  // const total_time = recipe["prep_time"]+recipe["cook_time"];
+  const total_time = recipe.prep_time+recipe.cook_time;
 
   console.table({'title': recipe.title});
   console.log(`DESCRIPTION: ${recipe.desc}`+'\n');

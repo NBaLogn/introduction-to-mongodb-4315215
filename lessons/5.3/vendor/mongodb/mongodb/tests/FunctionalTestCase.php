@@ -284,14 +284,27 @@ abstract class FunctionalTestCase extends TestCase
         $this->configuredFailPoints[] = [$command->configureFailPoint, $failPointServer];
     }
 
+    public static function getModuleInfo(string $row): ?string
+    {
+        ob_start();
+        phpinfo(INFO_MODULES);
+        $info = ob_get_clean();
+
+        $pattern = sprintf('/^%s(.*)$/m', preg_quote($row . ' => '));
+
+        if (preg_match($pattern, $info, $matches) !== 1) {
+            return null;
+        }
+
+        return $matches[1];
+    }
+
     /**
      * Creates the test collection with the specified options.
      *
      * If the "writeConcern" option is not specified but is supported by the
      * server, a majority write concern will be used. This is helpful for tests
      * using transactions or secondary reads.
-     *
-     * @param array $options
      */
     protected function createCollection(array $options = []): void
     {
@@ -307,8 +320,6 @@ abstract class FunctionalTestCase extends TestCase
      * If the "writeConcern" option is not specified but is supported by the
      * server, a majority write concern will be used. This is helpful for tests
      * using transactions or secondary reads.
-     *
-     * @param array $options
      */
     protected function dropCollection(array $options = []): void
     {
@@ -512,7 +523,7 @@ abstract class FunctionalTestCase extends TestCase
             $this->markTestSkipped('Client Side Encryption only supported on FCV 4.2 or higher');
         }
 
-        if ($this->getModuleInfo('libmongocrypt') === 'disabled') {
+        if (static::getModuleInfo('libmongocrypt') === 'disabled') {
             $this->markTestSkipped('Client Side Encryption is not enabled in the MongoDB extension');
         }
     }
@@ -598,25 +609,8 @@ abstract class FunctionalTestCase extends TestCase
         }
     }
 
-    private function getModuleInfo(string $row): ?string
-    {
-        ob_start();
-        phpinfo(INFO_MODULES);
-        $info = ob_get_clean();
-
-        $pattern = sprintf('/^%s([\w ]+)$/m', preg_quote($row . ' => '));
-
-        if (preg_match($pattern, $info, $matches) !== 1) {
-            return null;
-        }
-
-        return $matches[1];
-    }
-
     /**
      * Checks if the failCommand command is supported on this server version
-     *
-     * @return bool
      */
     private function isFailCommandSupported(): bool
     {
@@ -627,8 +621,6 @@ abstract class FunctionalTestCase extends TestCase
 
     /**
      * Checks if the failCommand command is enabled by checking the enableTestCommands parameter
-     *
-     * @return bool
      */
     private function isFailCommandEnabled(): bool
     {

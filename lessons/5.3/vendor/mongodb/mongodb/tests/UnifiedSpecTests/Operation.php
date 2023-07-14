@@ -8,6 +8,7 @@ use MongoDB\ChangeStream;
 use MongoDB\Client;
 use MongoDB\Collection;
 use MongoDB\Database;
+use MongoDB\Driver\ClientEncryption;
 use MongoDB\Driver\Cursor;
 use MongoDB\Driver\Server;
 use MongoDB\Driver\Session;
@@ -85,10 +86,10 @@ final class Operation
     private $entityMap;
 
     /** @var ExpectedError */
-    private $expectedError;
+    private $expectError;
 
     /** @var ExpectedResult */
-    private $expectedResult;
+    private $expectResult;
 
     /** @var bool */
     private $ignoreResultAndError;
@@ -186,6 +187,9 @@ final class Operation
             case Client::class:
                 $result = $this->executeForClient($object);
                 break;
+            case ClientEncryption::class:
+                $result = $this->executeForClientEncryption($object);
+                break;
             case Database::class:
                 $result = $this->executeForDatabase($object);
                 break;
@@ -275,6 +279,61 @@ final class Operation
         }
     }
 
+    private function executeForClientEncryption(ClientEncryption $clientEncryption)
+    {
+        $args = $this->prepareArguments();
+        Util::assertArgumentsBySchema(ClientEncryption::class, $this->name, $args);
+
+        switch ($this->name) {
+            case 'addKeyAltName':
+                assertArrayHasKey('id', $args);
+                assertArrayHasKey('keyAltName', $args);
+
+                return $clientEncryption->addKeyAltName($args['id'], $args['keyAltName']);
+
+            case 'createDataKey':
+                assertArrayHasKey('kmsProvider', $args);
+                // CSFLE spec tests nest options under an "opts" key (see: DRIVERS-2414)
+                $options = array_key_exists('opts', $args) ? (array) $args['opts'] : [];
+
+                return $clientEncryption->createDataKey($args['kmsProvider'], $options);
+
+            case 'deleteKey':
+                assertArrayHasKey('id', $args);
+
+                return $clientEncryption->deleteKey($args['id']);
+
+            case 'getKey':
+                assertArrayHasKey('id', $args);
+
+                return $clientEncryption->getKey($args['id']);
+
+            case 'getKeyByAltName':
+                assertArrayHasKey('keyAltName', $args);
+
+                return $clientEncryption->getKeyByAltName($args['keyAltName']);
+
+            case 'getKeys':
+                return iterator_to_array($clientEncryption->getKeys());
+
+            case 'removeKeyAltName':
+                assertArrayHasKey('id', $args);
+                assertArrayHasKey('keyAltName', $args);
+
+                return $clientEncryption->removeKeyAltName($args['id'], $args['keyAltName']);
+
+            case 'rewrapManyDataKey':
+                assertArrayHasKey('filter', $args);
+                // CSFLE spec tests nest options under an "opts" key (see: DRIVERS-2414)
+                $options = array_key_exists('opts', $args) ? (array) $args['opts'] : [];
+
+                return static::prepareRewrapManyDataKeyResult($clientEncryption->rewrapManyDataKey($args['filter'], $options));
+
+            default:
+                Assert::fail('Unsupported clientEncryption operation: ' . $this->name);
+        }
+    }
+
     private function executeForCollection(Collection $collection)
     {
         $args = $this->prepareArguments();
@@ -295,7 +354,12 @@ final class Operation
                 assertIsArray($args['requests']);
 
                 return $collection->bulkWrite(
-                    array_map('self::prepareBulkWriteRequest', $args['requests']),
+                    array_map(
+                        static function ($request) {
+                            return self::prepareBulkWriteRequest($request);
+                        },
+                        $args['requests']
+                    ),
                     array_diff_key($args, ['requests' => 1])
                 );
 
@@ -443,16 +507,12 @@ final class Operation
                 );
 
             case 'insertMany':
-                // Merge nested and top-level options (see: SPEC-1158)
-                $options = isset($args['options']) ? (array) $args['options'] : [];
-                $options += array_diff_key($args, ['documents' => 1]);
-
                 assertArrayHasKey('documents', $args);
                 assertIsArray($args['documents']);
 
                 return $collection->insertMany(
                     $args['documents'],
-                    $options
+                    array_diff_key($args, ['documents' => 1])
                 );
 
             case 'insertOne':
@@ -926,6 +986,31 @@ final class Operation
             default:
                 Assert::fail('Unsupported bulk write request: ' . $type);
         }
+    }
+
+    /**
+     * ClientEncryption::rewrapManyDataKey() returns its result as a raw BSON
+     * document and does not utilize WriteResult because getServer() cannot be
+     * implemented. To satisfy result expectations, unset bulkWriteResult if it
+     * is null and rename its fields (per the CRUD spec) otherwise. */
+    private static function prepareRewrapManyDataKeyResult(stdClass $result): object
+    {
+        if ($result->bulkWriteResult === null) {
+            unset($result->bulkWriteResult);
+
+            return $result;
+        }
+
+        $result->bulkWriteResult = [
+            'insertedCount' => $result->bulkWriteResult->nInserted,
+            'matchedCount' => $result->bulkWriteResult->nMatched,
+            'modifiedCount' => $result->bulkWriteResult->nModified,
+            'deletedCount' => $result->bulkWriteResult->nRemoved,
+            'upsertedCount' => $result->bulkWriteResult->nUpserted,
+            'upsertedIds' => $result->bulkWriteResult->upserted ?? new stdClass(),
+        ];
+
+        return $result;
     }
 
     private static function prepareUploadArguments(array $args): array

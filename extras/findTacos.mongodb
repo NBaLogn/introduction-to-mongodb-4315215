@@ -2,4 +2,8 @@
 use('cooker');
 
 // Find Tacos!
-db.recipes.find({"title": "Tacos"});
+// db.examples.updateOne(
+// 	{ title: 'Thin crust pizza' },
+// 	{ $unset: { vegan:1} },
+// );
+db.examples.find({title:'Thin crust pizza'})
